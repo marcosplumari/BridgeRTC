@@ -1,0 +1,11 @@
+## Visual Studio / .NET
+bin/
+obj/
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
+
+## VB6
+*.oca
+*.scc
