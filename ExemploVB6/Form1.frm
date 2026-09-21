@@ -1,6 +1,6 @@
 VERSION 5.00
 Begin VB.Form Form1 
-   Caption         =   "Teste Split Payment Bridge (VB6)"
+   Caption         =   "Teste BridgeRTC (VB6)"
    ClientHeight    =   4200
    ClientLeft      =   60
    ClientTop       =   450
@@ -48,8 +48,8 @@ Private Sub cmdVincular_Click()
     Dim oBridge As Object
     Dim sJson As String
     
-    txtResultado.Text = "Instanciando SplitPaymentBridge..."
-    Set oBridge = CreateObject("SplitPaymentBridge.SplitPaymentService")
+    txtResultado.Text = "Instanciando BridgeRTC..."
+    Set oBridge = CreateObject("BridgeRTC.BridgeRTCService")
     
     ' Configura ambiente (2 = Homologacao, 1 = Producao)
     oBridge.ConfigurarAmbiente 2, "SP"
@@ -79,7 +79,7 @@ Private Sub cmdGerarXml_Click()
     Dim oBridge As Object
     Dim sJson As String
     
-    Set oBridge = CreateObject("SplitPaymentBridge.SplitPaymentService")
+    Set oBridge = CreateObject("BridgeRTC.BridgeRTCService")
     
     ' Gera o bloco XML <pag> para inclusao imediata na emissao
     sJson = oBridge.GerarGrupoPagamentoXml("24", 99.5, "TEF-NSU-001234", "00000000000191", "AUTH5544")
