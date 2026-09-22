@@ -41,6 +41,9 @@ namespace BridgeRTC
 
         [DispId(9)]
         string SimularPagamentoPix(string txid);
+
+        [DispId(10)]
+        string ObterConciliacaoFinanceiraPix(string txid);
     }
 
     [Guid("B2C3D4E5-F6A7-4B6C-9D8E-0F1A2B3C4D5E")]
@@ -70,7 +73,12 @@ namespace BridgeRTC
         private class PixSimuladoData
         {
             public string TxId { get; set; }
-            public double Valor { get; set; }
+            public double ValorBruto { get; set; }
+            public double ValorTributosRetidos { get; set; }
+            public double ValorTarifaBancaria { get; set; }
+            public double ValorLiquidoRecebido { get; set; }
+            public double ValorCbs { get; set; }
+            public double ValorIbs { get; set; }
             public string Status { get; set; } // ATIVA, CONCLUIDA
             public string PixCopiaECola { get; set; }
             public string EndToEndId { get; set; }
@@ -80,7 +88,6 @@ namespace BridgeRTC
         public BridgeRTCService()
         {
             _jsonSerializer = new JavaScriptSerializer();
-            // Garante suporte a TLS 1.2 exigido pelo Bacen e SEFAZ
             ServicePointManager.SecurityProtocol = SecurityProtocolType.Tls12;
         }
 
@@ -123,9 +130,6 @@ namespace BridgeRTC
             }
         }
 
-        /// <summary>
-        /// Cria cobrança imediata Pix no padrão da API Pix do Bacen (v2)
-        /// </summary>
         public string CriarCobrancaPix(string txid, double valor, int expiracaoSegundos, string solicitacaoPagador)
         {
             try
@@ -142,17 +146,31 @@ namespace BridgeRTC
 
                 if (expiracaoSegundos <= 0)
                 {
-                    expiracaoSegundos = 3600; // 1 hora padrao
+                    expiracaoSegundos = 3600;
                 }
 
-                // Modo Simulador / Teste do time de desenvolvimento
+                // Estimativa de Split Payment (Reforma Tributária LC 214/2025)
+                // Exemplo alíquota padrão: CBS (8,8%) + IBS (17,7%) = 26,5% retido diretamente para a conta do governo
+                double cbsSimulado = Math.Round(valor * 0.088, 2);
+                double ibsSimulado = Math.Round(valor * 0.177, 2);
+                double tributosRetidos = Math.Round(cbsSimulado + ibsSimulado, 2);
+                double tarifaBancaria = 0.99; // tarifa fixa ou percentual média de adquirente/PSP
+                double liquido = Math.Round(valor - tributosRetidos - tarifaBancaria, 2);
+                if (liquido < 0) liquido = 0;
+
+                // Modo Simulador
                 if (_pixInstituicao == "SIMULADOR" || string.IsNullOrEmpty(_pixClientId))
                 {
                     string copiaEColaMock = "00020126580014br.gov.bcb.pix0136" + Guid.NewGuid().ToString() + "520400005303986540" + valor.ToString("F2", CultureInfo.InvariantCulture).Replace(",", ".") + "5802BR5913LOJISTA DEMO6009SAO PAULO62070503***6304ABCD";
                     var dadosSimulados = new PixSimuladoData
                     {
                         TxId = txid,
-                        Valor = valor,
+                        ValorBruto = valor,
+                        ValorTributosRetidos = tributosRetidos,
+                        ValorTarifaBancaria = tarifaBancaria,
+                        ValorLiquidoRecebido = liquido,
+                        ValorCbs = cbsSimulado,
+                        ValorIbs = ibsSimulado,
                         Status = "ATIVA",
                         PixCopiaECola = copiaEColaMock,
                         EndToEndId = "",
@@ -167,19 +185,26 @@ namespace BridgeRTC
                     {
                         txid = txid,
                         status = "ATIVA",
-                        valor = valor,
+                        valorBruto = valor,
                         chave = string.IsNullOrEmpty(_pixChave) ? "chave-simulada@pix.com.br" : _pixChave,
                         pixCopiaECola = copiaEColaMock,
                         location = "pix.bcb.gov.br/cobv2/" + txid,
                         expiracao = expiracaoSegundos,
                         instituicao = "SIMULADOR",
-                        ambiente = _tipoAmbiente == 1 ? "Producao" : "Homologacao"
+                        ambiente = _tipoAmbiente == 1 ? "Producao" : "Homologacao",
+                        previsaoConciliacao = new
+                        {
+                            valorBruto = valor,
+                            previsaoTributosRetidos = tributosRetidos,
+                            previsaoTarifaPsp = tarifaBancaria,
+                            previsaoLiquidoConta = liquido
+                        }
                     };
 
                     return FormatarRetorno("OK", "Cobranca Pix imediata gerada com sucesso (Modo Simulador)", retornoMock);
                 }
 
-                // Fluxo Real via API Bacen / Banco
+                // Fluxo Real via API Bacen
                 string token = ObterTokenOAuthPix();
                 string urlCob = ObterUrlBasePix() + "/v2/cob/" + txid;
 
@@ -203,9 +228,6 @@ namespace BridgeRTC
             }
         }
 
-        /// <summary>
-        /// Consulta status da cobrança Pix pelo txid (GET /v2/cob/{txid})
-        /// </summary>
         public string ConsultarCobrancaPix(string txid)
         {
             try
@@ -229,7 +251,18 @@ namespace BridgeRTC
                                 txid = cob.TxId,
                                 status = cob.Status,
                                 pago = pago,
-                                valor = cob.Valor,
+                                valorBruto = cob.ValorBruto,
+                                valorTributosRetidos = cob.ValorTributosRetidos,
+                                valorTarifaBancaria = cob.ValorTarifaBancaria,
+                                valorLiquidoRecebido = cob.ValorLiquidoRecebido,
+                                detalheSplit = new
+                                {
+                                    cbsRetido = cob.ValorCbs,
+                                    ibsRetido = cob.ValorIbs,
+                                    totalImpostosGoverno = cob.ValorTributosRetidos,
+                                    tarifaPSP = cob.ValorTarifaBancaria,
+                                    liquidoDisponivelCaixa = cob.ValorLiquidoRecebido
+                                },
                                 endToEndId = cob.EndToEndId,
                                 horario = DateTime.Now.ToString("yyyy-MM-ddTHH:mm:sszzz")
                             };
@@ -237,7 +270,6 @@ namespace BridgeRTC
                         }
                     }
 
-                    // Se não encontrado no mock, retorna ativa
                     return FormatarRetorno("OK", "Aguardando pagamento", new { txid = txid, status = "ATIVA", pago = false });
                 }
 
@@ -251,21 +283,71 @@ namespace BridgeRTC
                 bool estaPago = status.Equals("CONCLUIDA", StringComparison.OrdinalIgnoreCase);
 
                 string endToEndId = "";
+                double valorBruto = 0;
+                if (dadosPix.ContainsKey("valor"))
+                {
+                    var valObj = dadosPix["valor"] as Dictionary<string, object>;
+                    if (valObj != null && valObj.ContainsKey("original"))
+                    {
+                        double.TryParse(valObj["original"].ToString(), NumberStyles.Any, CultureInfo.InvariantCulture, out valorBruto);
+                    }
+                }
+
+                double tributosRetidos = 0;
+                double tarifaBancaria = 0;
+                double valorLiquido = valorBruto;
+
+                // Extrai dados de liquidação e split retornados pelo banco
                 if (estaPago && dadosPix.ContainsKey("pix"))
                 {
                     var listaPix = dadosPix["pix"] as System.Collections.ArrayList;
                     if (listaPix != null && listaPix.Count > 0)
                     {
                         var primeiroPix = listaPix[0] as Dictionary<string, object>;
-                        if (primeiroPix != null && primeiroPix.ContainsKey("endToEndId"))
+                        if (primeiroPix != null)
                         {
-                            endToEndId = primeiroPix["endToEndId"].ToString();
+                            if (primeiroPix.ContainsKey("endToEndId"))
+                                endToEndId = primeiroPix["endToEndId"].ToString();
+
+                            // Componentes de valor informados pelo Bacen / PSP no Split Payment
+                            if (primeiroPix.ContainsKey("componentesValor"))
+                            {
+                                var comp = primeiroPix["componentesValor"] as Dictionary<string, object>;
+                                if (comp != null)
+                                {
+                                    if (comp.ContainsKey("splitTributario"))
+                                    {
+                                        var splitTrib = comp["splitTributario"] as Dictionary<string, object>;
+                                        if (splitTrib != null && splitTrib.ContainsKey("totalRetido"))
+                                            double.TryParse(splitTrib["totalRetido"].ToString(), NumberStyles.Any, CultureInfo.InvariantCulture, out tributosRetidos);
+                                    }
+                                    if (comp.ContainsKey("tarifa"))
+                                    {
+                                        double.TryParse(comp["tarifa"].ToString(), NumberStyles.Any, CultureInfo.InvariantCulture, out tarifaBancaria);
+                                    }
+                                    if (comp.ContainsKey("valorLiquido"))
+                                    {
+                                        double.TryParse(comp["valorLiquido"].ToString(), NumberStyles.Any, CultureInfo.InvariantCulture, out valorLiquido);
+                                    }
+                                }
+                            }
                         }
                     }
                 }
 
+                if (tributosRetidos == 0 && estaPago)
+                {
+                    // Se o PSP ainda não detalhou no webhook o split, estima para fins de provisão contábil
+                    tributosRetidos = Math.Round(valorBruto * 0.265, 2);
+                    valorLiquido = Math.Round(valorBruto - tributosRetidos - tarifaBancaria, 2);
+                }
+
                 dadosPix["pago"] = estaPago;
                 dadosPix["endToEndId"] = endToEndId;
+                dadosPix["valorBruto"] = valorBruto;
+                dadosPix["valorTributosRetidos"] = tributosRetidos;
+                dadosPix["valorTarifaBancaria"] = tarifaBancaria;
+                dadosPix["valorLiquidoRecebido"] = valorLiquido;
 
                 return FormatarRetorno("OK", estaPago ? "Pagamento Pix confirmado no PSP" : "Aguardando confirmacao do pagamento", dadosPix);
             }
@@ -275,9 +357,11 @@ namespace BridgeRTC
             }
         }
 
-        /// <summary>
-        /// Permite ao time de desenvolvimento simular a aprovação imediata do Pix no caixa
-        /// </summary>
+        public string ObterConciliacaoFinanceiraPix(string txid)
+        {
+            return ConsultarCobrancaPix(txid);
+        }
+
         public string SimularPagamentoPix(string txid)
         {
             try
@@ -286,10 +370,22 @@ namespace BridgeRTC
                 {
                     if (!_cobrancasSimuladas.ContainsKey(txid))
                     {
+                        double valorPadrao = 100.00;
+                        double cbs = 8.80;
+                        double ibs = 17.70;
+                        double trib = 26.50;
+                        double tarifa = 0.99;
+                        double liq = 72.51;
+
                         _cobrancasSimuladas[txid] = new PixSimuladoData
                         {
                             TxId = txid,
-                            Valor = 10.00,
+                            ValorBruto = valorPadrao,
+                            ValorCbs = cbs,
+                            ValorIbs = ibs,
+                            ValorTributosRetidos = trib,
+                            ValorTarifaBancaria = tarifa,
+                            ValorLiquidoRecebido = liq,
                             Criacao = DateTime.Now
                         };
                     }
@@ -303,7 +399,19 @@ namespace BridgeRTC
                         txid = cob.TxId,
                         status = "CONCLUIDA",
                         pago = true,
-                        endToEndId = cob.EndToEndId
+                        endToEndId = cob.EndToEndId,
+                        valorBruto = cob.ValorBruto,
+                        valorTributosRetidos = cob.ValorTributosRetidos,
+                        valorTarifaBancaria = cob.ValorTarifaBancaria,
+                        valorLiquidoRecebido = cob.ValorLiquidoRecebido,
+                        detalheSplit = new
+                        {
+                            cbsRetido = cob.ValorCbs,
+                            ibsRetido = cob.ValorIbs,
+                            totalImpostosGoverno = cob.ValorTributosRetidos,
+                            tarifaPSP = cob.ValorTarifaBancaria,
+                            liquidoDisponivelCaixa = cob.ValorLiquidoRecebido
+                        }
                     });
                 }
             }
@@ -455,11 +563,9 @@ namespace BridgeRTC
 
         private string GerarTxIdValido()
         {
-            // txid deve ter entre 26 e 35 caracteres alfanuméricos
             return "BR" + DateTime.Now.ToString("yyyyMMddHHmmss") + Guid.NewGuid().ToString("N").Substring(0, 10);
         }
 
-        // Métodos de Vinculação SEFAZ / Split Payment
         public string VincularPagamentoDFe(string chaveDFe, string idTransacao, string codigoMeioPagto, double valor, string cnpjInstituicao, string codigoAutorizacao)
         {
             try
