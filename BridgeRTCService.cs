@@ -44,6 +44,12 @@ namespace BridgeRTC
 
         [DispId(10)]
         string ObterConciliacaoFinanceiraPix(string txid);
+
+        [DispId(11)]
+        string DevolverPix(string endToEndId, string idDevolucao, double valor, string motivo);
+
+        [DispId(12)]
+        string ConsultarDevolucaoPix(string endToEndId, string idDevolucao);
     }
 
     [Guid("B2C3D4E5-F6A7-4B6C-9D8E-0F1A2B3C4D5E")]
@@ -58,7 +64,6 @@ namespace BridgeRTC
         private string _uf = "SP";
         private readonly JavaScriptSerializer _jsonSerializer;
 
-        // Configurações do Pix Bacen
         private string _pixInstituicao = "SIMULADOR";
         private string _pixClientId = "";
         private string _pixClientSecret = "";
@@ -67,8 +72,8 @@ namespace BridgeRTC
         private string _pixTokenAcesso = "";
         private DateTime _pixTokenValidade = DateTime.MinValue;
 
-        // Repositório em memória para simulação / testes de desenvolvedores
         private static readonly Dictionary<string, PixSimuladoData> _cobrancasSimuladas = new Dictionary<string, PixSimuladoData>();
+        private static readonly Dictionary<string, DevolucaoSimuladaData> _devolucoesSimuladas = new Dictionary<string, DevolucaoSimuladaData>();
 
         private class PixSimuladoData
         {
@@ -79,10 +84,20 @@ namespace BridgeRTC
             public double ValorLiquidoRecebido { get; set; }
             public double ValorCbs { get; set; }
             public double ValorIbs { get; set; }
-            public string Status { get; set; } // ATIVA, CONCLUIDA
+            public string Status { get; set; }
             public string PixCopiaECola { get; set; }
             public string EndToEndId { get; set; }
             public DateTime Criacao { get; set; }
+        }
+
+        private class DevolucaoSimuladaData
+        {
+            public string EndToEndId { get; set; }
+            public string IdDevolucao { get; set; }
+            public double Valor { get; set; }
+            public string Status { get; set; }
+            public string Motivo { get; set; }
+            public DateTime Horario { get; set; }
         }
 
         public BridgeRTCService()
@@ -149,16 +164,13 @@ namespace BridgeRTC
                     expiracaoSegundos = 3600;
                 }
 
-                // Estimativa de Split Payment (Reforma Tributária LC 214/2025)
-                // Exemplo alíquota padrão: CBS (8,8%) + IBS (17,7%) = 26,5% retido diretamente para a conta do governo
                 double cbsSimulado = Math.Round(valor * 0.088, 2);
                 double ibsSimulado = Math.Round(valor * 0.177, 2);
                 double tributosRetidos = Math.Round(cbsSimulado + ibsSimulado, 2);
-                double tarifaBancaria = 0.99; // tarifa fixa ou percentual média de adquirente/PSP
+                double tarifaBancaria = 0.99;
                 double liquido = Math.Round(valor - tributosRetidos - tarifaBancaria, 2);
                 if (liquido < 0) liquido = 0;
 
-                // Modo Simulador
                 if (_pixInstituicao == "SIMULADOR" || string.IsNullOrEmpty(_pixClientId))
                 {
                     string copiaEColaMock = "00020126580014br.gov.bcb.pix0136" + Guid.NewGuid().ToString() + "520400005303986540" + valor.ToString("F2", CultureInfo.InvariantCulture).Replace(",", ".") + "5802BR5913LOJISTA DEMO6009SAO PAULO62070503***6304ABCD";
@@ -204,7 +216,6 @@ namespace BridgeRTC
                     return FormatarRetorno("OK", "Cobranca Pix imediata gerada com sucesso (Modo Simulador)", retornoMock);
                 }
 
-                // Fluxo Real via API Bacen
                 string token = ObterTokenOAuthPix();
                 string urlCob = ObterUrlBasePix() + "/v2/cob/" + txid;
 
@@ -237,7 +248,6 @@ namespace BridgeRTC
                     return FormatarRetorno("ERRO", "TxId nao informado para consulta.", null);
                 }
 
-                // Modo Simulador
                 if (_pixInstituicao == "SIMULADOR" || string.IsNullOrEmpty(_pixClientId))
                 {
                     lock (_cobrancasSimuladas)
@@ -273,7 +283,6 @@ namespace BridgeRTC
                     return FormatarRetorno("OK", "Aguardando pagamento", new { txid = txid, status = "ATIVA", pago = false });
                 }
 
-                // Fluxo Real
                 string token = ObterTokenOAuthPix();
                 string urlCob = ObterUrlBasePix() + "/v2/cob/" + txid;
                 string respostaHttp = ExecutarRequisicaoHttp("GET", urlCob, null, token, _pixCertificado);
@@ -297,7 +306,6 @@ namespace BridgeRTC
                 double tarifaBancaria = 0;
                 double valorLiquido = valorBruto;
 
-                // Extrai dados de liquidação e split retornados pelo banco
                 if (estaPago && dadosPix.ContainsKey("pix"))
                 {
                     var listaPix = dadosPix["pix"] as System.Collections.ArrayList;
@@ -309,7 +317,6 @@ namespace BridgeRTC
                             if (primeiroPix.ContainsKey("endToEndId"))
                                 endToEndId = primeiroPix["endToEndId"].ToString();
 
-                            // Componentes de valor informados pelo Bacen / PSP no Split Payment
                             if (primeiroPix.ContainsKey("componentesValor"))
                             {
                                 var comp = primeiroPix["componentesValor"] as Dictionary<string, object>;
@@ -337,7 +344,6 @@ namespace BridgeRTC
 
                 if (tributosRetidos == 0 && estaPago)
                 {
-                    // Se o PSP ainda não detalhou no webhook o split, estima para fins de provisão contábil
                     tributosRetidos = Math.Round(valorBruto * 0.265, 2);
                     valorLiquido = Math.Round(valorBruto - tributosRetidos - tarifaBancaria, 2);
                 }
@@ -354,6 +360,114 @@ namespace BridgeRTC
             catch (Exception ex)
             {
                 return FormatarRetorno("ERRO", "Falha ao consultar cobranca Pix: " + ex.Message, new { detalhe = ex.ToString() });
+            }
+        }
+
+        /// <summary>
+        /// Solicita a devolução (estorno) de um Pix pelo endToEndId oficial do Bacen
+        /// Endpoint Bacen: PUT /v2/pix/{e2eid}/devolucao/{idDevolucao}
+        /// </summary>
+        public string DevolverPix(string endToEndId, string idDevolucao, double valor, string motivo)
+        {
+            try
+            {
+                if (string.IsNullOrEmpty(endToEndId))
+                {
+                    return FormatarRetorno("ERRO", "EndToEndId e obrigatorio para devolucao.", null);
+                }
+
+                if (string.IsNullOrEmpty(idDevolucao))
+                {
+                    idDevolucao = "DEV" + DateTime.Now.ToString("yyyyMMddHHmmss") + Guid.NewGuid().ToString("N").Substring(0, 6);
+                }
+
+                if (valor <= 0)
+                {
+                    return FormatarRetorno("ERRO", "O valor para devolucao deve ser maior que zero.", null);
+                }
+
+                // Modo Simulador
+                if (_pixInstituicao == "SIMULADOR" || string.IsNullOrEmpty(_pixClientId))
+                {
+                    var devSim = new DevolucaoSimuladaData
+                    {
+                        EndToEndId = endToEndId,
+                        IdDevolucao = idDevolucao,
+                        Valor = valor,
+                        Status = "EM_PROCESSAMENTO", // Bacen retorna EM_PROCESSAMENTO ou DEVOLVIDO
+                        Motivo = string.IsNullOrEmpty(motivo) ? "Cancelamento de venda no caixa" : motivo,
+                        Horario = DateTime.Now
+                    };
+                    lock (_devolucoesSimuladas)
+                    {
+                        _devolucoesSimuladas[idDevolucao] = devSim;
+                    }
+
+                    var retMock = new
+                    {
+                        id = idDevolucao,
+                        rtrId = "D" + DateTime.Now.ToString("yyyyMMddHHmmss") + "SIMULADO",
+                        valor = valor.ToString("F2", CultureInfo.InvariantCulture),
+                        status = "DEVOLVIDO",
+                        motivo = devSim.Motivo,
+                        horario = DateTime.Now.ToString("yyyy-MM-ddTHH:mm:sszzz")
+                    };
+
+                    return FormatarRetorno("OK", "Devolucao/Estorno Pix efetuado com sucesso (Modo Simulador)", retMock);
+                }
+
+                // Fluxo Real Bacen
+                string token = ObterTokenOAuthPix();
+                string urlDev = ObterUrlBasePix() + "/v2/pix/" + endToEndId + "/devolucao/" + idDevolucao;
+
+                var payload = new
+                {
+                    valor = valor.ToString("F2", CultureInfo.InvariantCulture),
+                    natureza = "ORIGINAL",
+                    descricao = string.IsNullOrEmpty(motivo) ? "Cancelamento de compra no PDV" : motivo
+                };
+
+                string jsonEnvio = _jsonSerializer.Serialize(payload);
+                string respHttp = ExecutarRequisicaoHttp("PUT", urlDev, jsonEnvio, token, _pixCertificado);
+                var retornoApi = _jsonSerializer.Deserialize<Dictionary<string, object>>(respHttp);
+
+                return FormatarRetorno("OK", "Solicitacao de devolucao registrada com sucesso no Bacen", retornoApi);
+            }
+            catch (Exception ex)
+            {
+                return FormatarRetorno("ERRO", "Falha ao solicitar devolucao do Pix: " + ex.Message, new { detalhe = ex.ToString() });
+            }
+        }
+
+        public string ConsultarDevolucaoPix(string endToEndId, string idDevolucao)
+        {
+            try
+            {
+                if (string.IsNullOrEmpty(endToEndId) || string.IsNullOrEmpty(idDevolucao))
+                {
+                    return FormatarRetorno("ERRO", "EndToEndId e IdDevolucao sao obrigatorios.", null);
+                }
+
+                if (_pixInstituicao == "SIMULADOR" || string.IsNullOrEmpty(_pixClientId))
+                {
+                    return FormatarRetorno("OK", "Devolucao concluida", new
+                    {
+                        id = idDevolucao,
+                        status = "DEVOLVIDO",
+                        horario = DateTime.Now.ToString("yyyy-MM-ddTHH:mm:sszzz")
+                    });
+                }
+
+                string token = ObterTokenOAuthPix();
+                string urlDev = ObterUrlBasePix() + "/v2/pix/" + endToEndId + "/devolucao/" + idDevolucao;
+                string respHttp = ExecutarRequisicaoHttp("GET", urlDev, null, token, _pixCertificado);
+                var retornoApi = _jsonSerializer.Deserialize<Dictionary<string, object>>(respHttp);
+
+                return FormatarRetorno("OK", "Consulta de devolucao efetuada", retornoApi);
+            }
+            catch (Exception ex)
+            {
+                return FormatarRetorno("ERRO", "Falha ao consultar devolucao: " + ex.Message, null);
             }
         }
 
@@ -489,7 +603,7 @@ namespace BridgeRTC
             string credenciais = Convert.ToBase64String(Encoding.ASCII.GetBytes(_pixClientId + ":" + _pixClientSecret));
             request.Headers["Authorization"] = "Basic " + credenciais;
 
-            byte[] body = Encoding.UTF8.GetBytes("grant_type=client_credentials&scope=cob.write cob.read pix.read");
+            byte[] body = Encoding.UTF8.GetBytes("grant_type=client_credentials&scope=cob.write cob.read pix.read pix.write");
             request.ContentLength = body.Length;
 
             using (Stream reqStream = request.GetRequestStream())
@@ -604,6 +718,9 @@ namespace BridgeRTC
             }
         }
 
+        /// <summary>
+        /// Gera a estrutura XML com tpIntegra=1 obrigatorio para pagamentos integrados no PDV
+        /// </summary>
         public string GerarGrupoPagamentoXml(string codigoMeioPagto, double valor, string idTransacao, string cnpjInstituicao, string codigoAutorizacao)
         {
             try
@@ -611,8 +728,16 @@ namespace BridgeRTC
                 StringBuilder sb = new StringBuilder();
                 sb.AppendLine("<pag>");
                 sb.AppendLine("  <detPag>");
+                sb.AppendLine("    <indPag>0</indPag>"); // 0 = Pagamento a Vista
                 sb.AppendLine($"    <tPag>{codigoMeioPagto}</tPag>");
                 sb.AppendLine($"    <vPag>{valor.ToString("F2", CultureInfo.InvariantCulture)}</vPag>");
+                sb.AppendLine("    <card>");
+                sb.AppendLine("      <tpIntegra>1</tpIntegra>"); // 1 = Pagamento integrado com o sistema de automacao
+                if (!string.IsNullOrEmpty(cnpjInstituicao))
+                    sb.AppendLine($"      <CNPJ>{cnpjInstituicao}</CNPJ>");
+                if (!string.IsNullOrEmpty(codigoAutorizacao))
+                    sb.AppendLine($"      <cAut>{codigoAutorizacao}</cAut>");
+                sb.AppendLine("    </card>");
                 sb.AppendLine("    <infTransacPag>");
                 if (!string.IsNullOrEmpty(idTransacao))
                     sb.AppendLine($"      <idTransacao>{idTransacao}</idTransacao>");
@@ -624,7 +749,7 @@ namespace BridgeRTC
                 sb.AppendLine("  </detPag>");
                 sb.AppendLine("</pag>");
 
-                return FormatarRetorno("OK", "Grupo XML de pagamento gerado com sucesso", new { xml = sb.ToString() });
+                return FormatarRetorno("OK", "Grupo XML de pagamento gerado com sucesso (tpIntegra=1)", new { xml = sb.ToString() });
             }
             catch (Exception ex)
             {
