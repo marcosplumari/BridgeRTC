@@ -1,14 +1,22 @@
 VERSION 5.00
 Begin VB.Form Form1 
    Caption         =   "Teste BridgeRTC - Split Payment e Pix Bacen"
-   ClientHeight    =   6200
+   ClientHeight    =   7800
    ClientLeft      =   60
    ClientTop       =   450
    ClientWidth     =   7800
    LinkTopic       =   "Form1"
-   ScaleHeight     =   6200
+   ScaleHeight     =   7800
    ScaleWidth      =   7800
    StartUpPosition =   2  'CenterScreen
+   Begin VB.CommandButton cmdConciliacao 
+      Caption         =   "4. Conciliacao Financeira Split Payment"
+      Height          =   495
+      Left            =   360
+      TabIndex        =   6
+      Top             =   1440
+      Width           =   7095
+   End
    Begin VB.CommandButton cmdAbrirPixSupermercado 
       Caption         =   "Abrir Tela PIX Supermercado (Modal / Auto Fechamento)"
       BeginProperty Font 
@@ -23,7 +31,7 @@ Begin VB.Form Form1
       Height          =   550
       Left            =   360
       TabIndex        =   5
-      Top             =   1680
+      Top             =   2040
       Width           =   7095
    End
    Begin VB.CommandButton cmdStatus 
@@ -47,16 +55,16 @@ Begin VB.Form Form1
       Height          =   495
       Left            =   360
       TabIndex        =   2
-      Top             =   960
+      Top             =   840
       Width           =   7095
    End
    Begin VB.TextBox txtResultado 
-      Height          =   3300
+      Height          =   4900
       Left            =   360
       MultiLine       =   -1  'True
       ScrollBars      =   3  'Both
       TabIndex        =   3
-      Top             =   2400
+      Top             =   2760
       Width           =   7095
    End
    Begin VB.Label lblStatus 
@@ -64,7 +72,7 @@ Begin VB.Form Form1
       Height          =   255
       Left            =   360
       TabIndex        =   4
-      Top             =   2160
+      Top             =   2520
       Width           =   2000
    End
 End
@@ -76,26 +84,50 @@ Attribute VB_Exposed = False
 Option Explicit
 
 Private Sub cmdAbrirPixSupermercado_Click()
-    ' Demonstração do fluxo de supermercado:
-    ' 1. Abre modal com o QR Code
-    ' 2. O cliente paga no celular
-    ' 3. A tela fecha sozinha e emite a NFC-e vinculada
     Load frmPixSupermercado
-    frmPixSupermercado.IniciarCobranca 48.5, "Compra Caixa 01 - Supermercado"
+    frmPixSupermercado.IniciarCobranca 100#, "Venda Caixa 01 - Supermercado"
     frmPixSupermercado.Show vbModal
     
     If frmPixSupermercado.PagamentoConfirmado Then
-        txtResultado.Text = "=== PAGAMENTO PIX CONFIRMADO NO CAIXA ===" & vbCrLf & _
-                            "EndToEndId: " & frmPixSupermercado.EndToEndId & vbCrLf & _
-                            "Emitindo NFC-e com meio de pagamento 17 (Pix)..." & vbCrLf & vbCrLf & _
-                            "Retorno completo da API Bacen:" & vbCrLf & _
-                            frmPixSupermercado.JsonUltimoRetorno
-        MsgBox "Venda concluída com sucesso! NFC-e emitida.", vbInformation, "Caixa Liberado"
+        Dim sLog As String
+        sLog = "=== PAGAMENTO PIX CONFIRMADO NO CAIXA ===" & vbCrLf & _
+               "EndToEndId: " & frmPixSupermercado.EndToEndId & vbCrLf & vbCrLf & _
+               "----- CONCILIACAO FINANCEIRA (LANCAMENTO CONTAS A RECEBER) -----" & vbCrLf & _
+               "Valor Bruto da Venda............: R$ " & FormatNumber(frmPixSupermercado.ValorBruto, 2) & vbCrLf & _
+               "(-) CBS retida (Governo Federal): R$ " & FormatNumber(frmPixSupermercado.ValorCbs, 2) & vbCrLf & _
+               "(-) IBS retido (Estados/Munic.)..: R$ " & FormatNumber(frmPixSupermercado.ValorIbs, 2) & vbCrLf & _
+               "(-) Total Impostos Retidos......: R$ " & FormatNumber(frmPixSupermercado.ValorTributosRetidos, 2) & vbCrLf & _
+               "(-) Tarifa Transacional PSP.....: R$ " & FormatNumber(frmPixSupermercado.ValorTarifa, 2) & vbCrLf & _
+               "(=) LIQUIDO A ENTRAR NO CAIXA...: R$ " & FormatNumber(frmPixSupermercado.ValorLiquido, 2) & vbCrLf & vbCrLf & _
+               "Emitindo NFC-e com meio de pagamento 17 (Pix) e idTransacao..." & vbCrLf & vbCrLf & _
+               "Retorno completo JSON da DLL:" & vbCrLf & _
+               frmPixSupermercado.JsonUltimoRetorno
+        txtResultado.Text = sLog
+        MsgBox "Pagamento concluído! Líquido de R$ " & FormatNumber(frmPixSupermercado.ValorLiquido, 2) & " disponibilizado.", vbInformation, "Venda Concluída"
     Else
         txtResultado.Text = "Operação Pix cancelada ou expirada pelo operador."
     End If
     
     Unload frmPixSupermercado
+End Sub
+
+Private Sub cmdConciliacao_Click()
+    On Error GoTo TrataErro
+    Dim bridge As Object
+    Set bridge = CreateObject("BridgeRTC.BridgeRTCService")
+    bridge.ConfigurarAmbiente 2, "SP"
+    bridge.ConfigurarPix "SIMULADOR", "", "", "", "", ""
+    
+    Dim txid As String
+    txid = "CONC" & Format(Now, "yyyymmddhhnnss")
+    bridge.CriarCobrancaPix txid, 100#, 3600, "Venda Demonstração Split"
+    bridge.SimularPagamentoPix txid
+    
+    txtResultado.Text = bridge.ObterConciliacaoFinanceiraPix(txid)
+    Set bridge = Nothing
+    Exit Sub
+TrataErro:
+    txtResultado.Text = "Erro: " & Err.Description
 End Sub
 
 Private Sub cmdStatus_Click()
@@ -114,7 +146,7 @@ Private Sub cmdGerarXml_Click()
     On Error GoTo TrataErro
     Dim bridge As Object
     Set bridge = CreateObject("BridgeRTC.BridgeRTCService")
-    txtResultado.Text = bridge.GerarGrupoPagamentoXml("17", 48.5, "E12345678202609220000000001", "00000000000191", "AUTH987654")
+    txtResultado.Text = bridge.GerarGrupoPagamentoXml("17", 100#, "E12345678202609220000000001", "00000000000191", "AUTH987654")
     Set bridge = Nothing
     Exit Sub
 TrataErro:
@@ -126,7 +158,7 @@ Private Sub cmdVincular_Click()
     Dim bridge As Object
     Set bridge = CreateObject("BridgeRTC.BridgeRTCService")
     bridge.ConfigurarAmbiente 2, "SP"
-    txtResultado.Text = bridge.VincularPagamentoDFe("35260100000000000191550010000000011000000018", "E12345678202609220000000001", "17", 48.5, "00000000000191", "AUTH987654")
+    txtResultado.Text = bridge.VincularPagamentoDFe("35260100000000000191550010000000011000000018", "E12345678202609220000000001", "17", 100#, "00000000000191", "AUTH987654")
     Set bridge = Nothing
     Exit Sub
 TrataErro:
