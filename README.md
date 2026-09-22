@@ -1,46 +1,28 @@
 # BridgeRTC
 
-Biblioteca em C# (.NET Framework 4.8) com interoperabilidade COM para **Visual Basic 6.0 (VB6)**, voltada ao atendimento da **Reforma Tributária (Lei Complementar nº 214/2025 - Split Payment)** e integração nativa com a **API Pix do Banco Central do Brasil (Bacen v2)** diretamente com instituições financeiras, sem necessidade de gateways intermediários.
+Biblioteca em C# (.NET Framework 4.8) com interoperabilidade COM para **Visual Basic 6.0 (VB6)**, voltada ao atendimento da **Reforma Tributária (Lei Complementar nº 214/2025 - Split Payment)** e integração nativa com a **API Pix do Banco Central do Brasil (Bacen v2)** diretamente com instituições financeiras.
 
 ---
 
-## Recursos Implementados
+## Novos Recursos Implementados
 
-1. **API Pix Bacen v2 Direta (Multi-Bancos)**:
-   - Suporte nativo ao padrão do Banco Central (Bacen).
-   - Compatível com Banco do Brasil, Itaú, Santander, Banco Inter, Sicoob, Bradesco, Efí (Gerencianet) e conexões customizadas.
-   - Autenticação OAuth 2.0 com certificado digital cliente mTLS (.pfx / ICP-Brasil).
-   - Criação de cobrança imediata (`PUT /v2/cob/{txid}`) com geração de payload `pixCopiaECola`.
-   - Consulta de liquidação (`GET /v2/cob/{txid}`) com captura automática do `endToEndId`.
-   - Modo Simulador integrado para agilizar o desenvolvimento e testes do time de software.
+1. **Estorno e Devolução de Pix no Caixa (`DevolverPix` / `ConsultarDevolucaoPix`)**:
+   - Atende à especificação oficial do Bacen (`PUT /v2/pix/{e2eid}/devolucao/{idDevolucao}`).
+   - Permite que o operador de caixa estorne a venda imediatamente caso haja erro de impressão ou cancelamento de compra, devolvendo o dinheiro à conta do cliente em segundos.
 
-2. **Interface Frente de Caixa (PDV Supermercado) em VB6**:
-   - Formulário modal `frmPixSupermercado.frm`.
-   - Exibição de QR Code em tela e texto copia-e-cola.
-   - Polling automático via Timer a cada 2,5 segundos.
-   - Auto-fechamento imediato após a confirmação do pagamento no banco do consumidor.
-   - Liberação dos dados para emissão e impressão instantânea da NFC-e.
+2. **Geração de XML de Pagamento com `<tpIntegra>1</tpIntegra>`**:
+   - Atende às exigências das SEFAZ estaduais para pagamentos integrados no PDV.
+   - Gera as tags `<pag>`, `<card>`, `<tpIntegra>1</tpIntegra>` e `<infTransacPag>` com o `idTransacao` (`endToEndId`).
 
-3. **Split Payment e Reforma Tributária (RTC)**:
-   - Geração das tags XML `<pag>` e `<infTransacPag>` conforme a NT 2026.006.
-   - Vinculação posterior de pagamentos à SEFAZ via evento 110300.
-   - Retornos estruturados em formato JSON padronizado (`STATUS`, `DESCRICAO`, `RETORNO`).
+3. **Frente de Caixa (PDV Supermercado) Resiliente em VB6**:
+   - Temporizador de timeout regressivo (3 minutos de espera máxima configurável).
+   - Botão de **Reconsulta Forçada ("Reconsultar Banco Agora")** para contornar instabilidades temporárias de internet no caixa sem perder vendas.
+   - Painel dinâmico de exibição da segregação do Split Payment (Bruto, CBS/IBS retidos e Líquido em conta).
 
 ---
 
-## Como Compilar e Registrar
+## Documentação Técnica
 
-```cmd
-:: 1. Abra o Prompt de Comando do Desenvolvedor do Visual Studio como Administrador
-:: 2. Compile a DLL:
-msbuild BridgeRTC.csproj /p:Configuration=Release
-
-:: 3. Registre no COM do Windows:
-registrar_dll.bat
-```
-
----
-
-## Documentação Técnica Completa
-
-Consulte o arquivo **`DOCUMENTACAO_PIX_BRIDGERTC.md`** na raiz deste repositório para o manual detalhado com diagramas de fluxo, credenciamento em bancos, pré-requisitos e testes em homologação e produção.
+Consulte os arquivos na raiz deste repositório:
+- **`DOCUMENTACAO_PIX_BRIDGERTC.md`**: Manual de integração, credenciamento em bancos e procedimentos de homologação/produção.
+- **`GUIA_CONCILIACAO_SPLIT_PAYMENT.md`**: Manual detalhado de conciliação financeira para contas a receber e fluxo de caixa.
