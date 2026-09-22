@@ -1,47 +1,14 @@
 VERSION 5.00
 Begin VB.Form Form1 
    Caption         =   "Teste BridgeRTC - Split Payment e Pix Bacen"
-   ClientHeight    =   8200
+   ClientHeight    =   8600
    ClientLeft      =   60
    ClientTop       =   450
    ClientWidth     =   7800
    LinkTopic       =   "Form1"
-   ScaleHeight     =   8200
+   ScaleHeight     =   8600
    ScaleWidth      =   7800
    StartUpPosition =   2  'CenterScreen
-   Begin VB.CommandButton cmdEstornoPix 
-      Caption         =   "5. Testar Devolucao / Estorno de Pix no Caixa"
-      Height          =   450
-      Left            =   360
-      TabIndex        =   7
-      Top             =   1920
-      Width           =   7095
-   End
-   Begin VB.CommandButton cmdConciliacao 
-      Caption         =   "4. Conciliacao Financeira Split Payment"
-      Height          =   450
-      Left            =   360
-      TabIndex        =   6
-      Top             =   1380
-      Width           =   7095
-   End
-   Begin VB.CommandButton cmdAbrirPixSupermercado 
-      Caption         =   "Abrir Tela PIX Supermercado (Modal / Auto Fechamento)"
-      BeginProperty Font 
-         Name            =   "MS Sans Serif"
-         Size            =   8.25
-         Charset         =   0
-         Weight          =   700
-         Underline       =   0   'False
-         Italic          =   0   'False
-         Strikethrough   =   0   'False
-      EndProperty
-      Height          =   500
-      Left            =   360
-      TabIndex        =   5
-      Top             =   2460
-      Width           =   7095
-   End
    Begin VB.CommandButton cmdStatus 
       Caption         =   "1. Consultar Status Servico"
       Height          =   450
@@ -63,25 +30,66 @@ Begin VB.Form Form1
       Height          =   450
       Left            =   360
       TabIndex        =   2
-      Top             =   810
+      Top             =   780
       Width           =   7095
    End
-   Begin VB.TextBox txtResultado 
-      Height          =   4800
+   Begin VB.CommandButton cmdConciliacao 
+      Caption         =   "4. Conciliacao Financeira Split Payment"
+      Height          =   450
       Left            =   360
-      MultiLine       =   -1  'True
-      ScrollBars      =   3  'Both
       TabIndex        =   3
-      Top             =   3240
+      Top             =   1320
+      Width           =   7095
+   End
+   Begin VB.CommandButton cmdEstornoPix 
+      Caption         =   "5. Testar Devolucao / Estorno de Pix no Caixa"
+      Height          =   450
+      Left            =   360
+      TabIndex        =   4
+      Top             =   1860
+      Width           =   7095
+   End
+   Begin VB.CommandButton cmdBancoCustomizado 
+      Caption         =   "6. Testar Banco Customizado (ConfigurarPixCustomizado)"
+      Height          =   450
+      Left            =   360
+      TabIndex        =   5
+      Top             =   2400
+      Width           =   7095
+   End
+   Begin VB.CommandButton cmdAbrirPixSupermercado 
+      Caption         =   "Abrir Tela PIX Supermercado (Modal / Auto Fechamento)"
+      BeginProperty Font 
+         Name            =   "MS Sans Serif"
+         Size            =   8.25
+         Charset         =   0
+         Weight          =   700
+         Underline       =   0   'False
+         Italic          =   0   'False
+         Strikethrough   =   0   'False
+      EndProperty
+      Height          =   500
+      Left            =   360
+      TabIndex        =   6
+      Top             =   2940
       Width           =   7095
    End
    Begin VB.Label lblStatus 
       Caption         =   "Retorno JSON da DLL:"
       Height          =   255
       Left            =   360
-      TabIndex        =   4
-      Top             =   3000
+      TabIndex        =   7
+      Top             =   3560
       Width           =   2000
+   End
+   Begin VB.TextBox txtResultado 
+      Height          =   4600
+      Left            =   360
+      MultiLine       =   -1  'True
+      ScrollBars      =   3  'Both
+      TabIndex        =   8
+      Top             =   3840
+      Width           =   7095
    End
 End
 Attribute VB_Name = "Form1"
@@ -117,6 +125,48 @@ Private Sub cmdAbrirPixSupermercado_Click()
     End If
     
     Unload frmPixSupermercado
+End Sub
+
+Private Sub cmdBancoCustomizado_Click()
+    On Error GoTo TrataErro
+    Dim bridge As Object
+    Set bridge = CreateObject("BridgeRTC.BridgeRTCService")
+    
+    ' Exemplo configurando uma instituicao que nao esta no switch fixo (ex: Sicredi)
+    Dim urlBase As String
+    Dim urlOAuth As String
+    Dim retornoJson As String
+    
+    urlBase = "https://api-pix.sicredi.com.br/pix/v2"
+    urlOAuth = "https://api-pix.sicredi.com.br/oauth/v2/token"
+    
+    ' Executa a configuracao customizada
+    retornoJson = bridge.ConfigurarPixCustomizado( _
+        urlBase, _
+        urlOAuth, _
+        "CLIENT_ID_EXEMPLO_12345", _
+        "CLIENT_SECRET_EXEMPLO_67890", _
+        "contato@lojistaexemplo.com.br", _
+        "", _
+        "" _
+    )
+    
+    txtResultado.Text = "=== RETORNO DO ConfigurarPixCustomizado ===" & vbCrLf & _
+                        retornoJson
+    
+    ' Identifica o STATUS no JSON retornado
+    If InStr(retornoJson, ""STATUS":"OK"") > 0 Then
+        MsgBox "Configuração validada com sucesso na DLL!" & vbCrLf & _
+               "Status: OK", vbInformation, "Banco Customizado"
+    Else
+        MsgBox "Falha na validação da configuração:" & vbCrLf & _
+               retornoJson, vbExclamation, "Banco Customizado - ERRO"
+    End If
+    
+    Set bridge = Nothing
+    Exit Sub
+TrataErro:
+    txtResultado.Text = "Erro: " & Err.Description
 End Sub
 
 Private Sub cmdEstornoPix_Click()
