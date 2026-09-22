@@ -50,6 +50,9 @@ namespace BridgeRTC
 
         [DispId(12)]
         string ConsultarDevolucaoPix(string endToEndId, string idDevolucao);
+
+        [DispId(13)]
+        string ConfigurarPixCustomizado(string urlBase, string urlOAuth, string clientId, string clientSecret, string chavePix, string caminhoCertificadoPfx, string senhaCertificado);
     }
 
     [Guid("B2C3D4E5-F6A7-4B6C-9D8E-0F1A2B3C4D5E")]
@@ -68,6 +71,8 @@ namespace BridgeRTC
         private string _pixClientId = "";
         private string _pixClientSecret = "";
         private string _pixChave = "";
+        private string _pixUrlBaseCustomizada = "";
+        private string _pixUrlOAuthCustomizada = "";
         private X509Certificate2 _pixCertificado;
         private string _pixTokenAcesso = "";
         private DateTime _pixTokenValidade = DateTime.MinValue;
@@ -134,6 +139,10 @@ namespace BridgeRTC
             _pixClientId = clientId ?? "";
             _pixClientSecret = clientSecret ?? "";
             _pixChave = chavePix ?? "";
+            _pixUrlBaseCustomizada = "";
+            _pixUrlOAuthCustomizada = "";
+            _pixTokenAcesso = "";
+            _pixTokenValidade = DateTime.MinValue;
 
             if (!string.IsNullOrEmpty(caminhoCertificadoPfx) && File.Exists(caminhoCertificadoPfx))
             {
@@ -142,6 +151,94 @@ namespace BridgeRTC
             else if (_certificado != null)
             {
                 _pixCertificado = _certificado;
+            }
+        }
+
+        public string ConfigurarPixCustomizado(string urlBase, string urlOAuth, string clientId, string clientSecret, string chavePix, string caminhoCertificadoPfx, string senhaCertificado)
+        {
+            try
+            {
+                if (string.IsNullOrWhiteSpace(urlBase))
+                {
+                    return FormatarRetorno("ERRO", "URL Base do Pix e obrigatoria.", null);
+                }
+
+                if (!Uri.TryCreate(urlBase.Trim(), UriKind.Absolute, out Uri uriBase) || uriBase.Scheme != Uri.UriSchemeHttps)
+                {
+                    return FormatarRetorno("ERRO", "URL Base invalida. Deve ser uma URL absoluta iniciando obrigatoriamente com https:// (ex: https://api.seubanco.com.br/pix/v2).", null);
+                }
+
+                if (string.IsNullOrWhiteSpace(urlOAuth))
+                {
+                    return FormatarRetorno("ERRO", "URL de autenticacao OAuth e obrigatoria.", null);
+                }
+
+                if (!Uri.TryCreate(urlOAuth.Trim(), UriKind.Absolute, out Uri uriOAuth) || uriOAuth.Scheme != Uri.UriSchemeHttps)
+                {
+                    return FormatarRetorno("ERRO", "URL OAuth invalida. Deve ser uma URL absoluta iniciando obrigatoriamente com https:// (ex: https://oauth.seubanco.com.br/oauth/token).", null);
+                }
+
+                if (string.IsNullOrWhiteSpace(clientId))
+                {
+                    return FormatarRetorno("ERRO", "Client ID e obrigatorio.", null);
+                }
+
+                if (string.IsNullOrWhiteSpace(clientSecret))
+                {
+                    return FormatarRetorno("ERRO", "Client Secret e obrigatorio.", null);
+                }
+
+                if (string.IsNullOrWhiteSpace(chavePix))
+                {
+                    return FormatarRetorno("ERRO", "Chave Pix e obrigatoria.", null);
+                }
+
+                bool certificadoCarregado = false;
+                if (!string.IsNullOrEmpty(caminhoCertificadoPfx))
+                {
+                    if (!File.Exists(caminhoCertificadoPfx))
+                    {
+                        return FormatarRetorno("ERRO", "Arquivo de certificado A1 (.pfx) nao encontrado no caminho: " + caminhoCertificadoPfx, null);
+                    }
+                    try
+                    {
+                        _pixCertificado = new X509Certificate2(caminhoCertificadoPfx, senhaCertificado ?? "", X509KeyStorageFlags.MachineKeySet | X509KeyStorageFlags.Exportable);
+                        certificadoCarregado = true;
+                    }
+                    catch (Exception exCert)
+                    {
+                        return FormatarRetorno("ERRO", "Falha ao abrir certificado A1 com a senha fornecida: " + exCert.Message, null);
+                    }
+                }
+                else if (_certificado != null)
+                {
+                    _pixCertificado = _certificado;
+                    certificadoCarregado = true;
+                }
+
+                _pixInstituicao = "CUSTOM";
+                _pixUrlBaseCustomizada = urlBase.Trim().TrimEnd('/');
+                _pixUrlOAuthCustomizada = urlOAuth.Trim();
+                _pixClientId = clientId.Trim();
+                _pixClientSecret = clientSecret.Trim();
+                _pixChave = chavePix.Trim();
+                _pixTokenAcesso = "";
+                _pixTokenValidade = DateTime.MinValue;
+
+                var meta = new Dictionary<string, object>
+                {
+                    { "modo", "CUSTOM" },
+                    { "urlBase", _pixUrlBaseCustomizada },
+                    { "urlOAuth", _pixUrlOAuthCustomizada },
+                    { "chavePix", _pixChave },
+                    { "certificadoA1Carregado", certificadoCarregado }
+                };
+
+                return FormatarRetorno("OK", "Configuracao Pix personalizada validada e carregada com sucesso.", meta);
+            }
+            catch (Exception ex)
+            {
+                return FormatarRetorno("ERRO", "Erro ao validar configuracao personalizada do Pix: " + ex.Message, null);
             }
         }
 
@@ -537,6 +634,11 @@ namespace BridgeRTC
 
         private string ObterUrlBasePix()
         {
+            if (!string.IsNullOrEmpty(_pixUrlBaseCustomizada))
+            {
+                return _pixUrlBaseCustomizada;
+            }
+
             bool homolog = (_tipoAmbiente == 2);
             switch (_pixInstituicao)
             {
@@ -557,12 +659,17 @@ namespace BridgeRTC
                 case "GERENCIANET":
                     return homolog ? "https://pix-h.gerencianet.com.br" : "https://pix.gerencianet.com.br";
                 default:
-                    return "https://api.bcb.gov.br/pix/v2";
+                    throw new InvalidOperationException("Instituicao Pix '" + _pixInstituicao + "' nao possui URLs pre-configuradas na DLL. Utilize o metodo ConfigurarPixCustomizado informando a URL Base e a URL OAuth da sua instituicao bancaria.");
             }
         }
 
         private string ObterUrlOAuthPix()
         {
+            if (!string.IsNullOrEmpty(_pixUrlOAuthCustomizada))
+            {
+                return _pixUrlOAuthCustomizada;
+            }
+
             bool homolog = (_tipoAmbiente == 2);
             switch (_pixInstituicao)
             {
