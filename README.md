@@ -238,3 +238,34 @@ msbuild BridgeRTC.csproj /p:Configuration=Release
 :: Ou execute diretamente o arquivo em lote incluído na raiz:
 registrar_dll.bat
 ```
+
+
+### Suporte a Qualquer Banco ou Instituição (Configuração Customizada)
+
+Para bancos ou cooperativas que não possuem URLs fixas embutidas no switch da DLL (como Sicredi, Caixa, Safra, cooperativas regionais, etc.), utilize o método `ConfigurarPixCustomizado`:
+
+```vb
+' Exemplo VB6 para qualquer instituição bancária:
+Dim respConfig As String
+Dim urlBase As String
+Dim urlOAuth As String
+
+urlBase = "https://api-pix.sicredi.com.br/pix/v2"
+urlOAuth = "https://api-pix.sicredi.com.br/oauth/v2/token"
+
+respConfig = bridge.ConfigurarPixCustomizado( _
+    urlBase, _
+    urlOAuth, _
+    "SEU_CLIENT_ID", _
+    "SEU_CLIENT_SECRET", _
+    "suachave@pix.com.br", _
+    "C:\Certificados\empresa.pfx", _
+    "123456" _
+)
+
+' respConfig retorna JSON com STATUS = "OK" ou "ERRO"
+' Validações automáticas:
+' - URL Base e URL OAuth devem ser HTTPS absoluto
+' - Validação e teste de abertura do certificado A1 (.pfx)
+' - Limpeza e preparação segura do cache de autenticação
+```
