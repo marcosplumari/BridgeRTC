@@ -2,55 +2,82 @@ VERSION 5.00
 Begin VB.Form frmPixSupermercado 
    BorderStyle     =   3  'Fixed Dialog
    Caption         =   "Pagamento PIX - Supermercado / PDV"
-   ClientHeight    =   7400
+   ClientHeight    =   7900
    ClientLeft      =   45
    ClientTop       =   375
    ClientWidth     =   7500
    LinkTopic       =   "Form1"
    MaxButton       =   0   'False
    MinButton       =   0   'False
-   ScaleHeight     =   7400
+   ScaleHeight     =   7900
    ScaleWidth      =   7500
    ShowInTaskbar   =   0   'False
    StartUpPosition =   2  'CenterScreen
+   Begin VB.CommandButton cmdReconsultarBanco 
+      Caption         =   "Reconsultar Banco Agora"
+      Height          =   450
+      Left            =   360
+      TabIndex        =   9
+      Top             =   7200
+      Width           =   2200
+   End
    Begin VB.Timer tmrPolling 
       Enabled         =   0   'False
       Interval        =   2500
       Left            =   120
-      Top             =   6720
+      Top             =   7200
    End
    Begin VB.CommandButton cmdSimularConfirmacao 
-      Caption         =   "Simular Pagamento (Dev/Teste)"
-      Height          =   495
-      Left            =   1200
+      Caption         =   "Simular Pagamento (Dev)"
+      Height          =   450
+      Left            =   2700
       TabIndex        =   5
-      Top             =   6720
-      Width           =   2800
+      Top             =   7200
+      Width           =   2400
    End
    Begin VB.CommandButton cmdCancelar 
-      Caption         =   "Cancelar Operação"
-      Height          =   495
-      Left            =   4200
+      Caption         =   "Cancelar"
+      Height          =   450
+      Left            =   5250
       TabIndex        =   4
-      Top             =   6720
-      Width           =   2000
+      Top             =   7200
+      Width           =   1845
    End
    Begin VB.TextBox txtPixCopiaECola 
       BackColor       =   &H00F0F0F0&
-      Height          =   615
+      Height          =   555
       Left            =   360
       Locked          =   -1  'True
       MultiLine       =   -1  'True
       ScrollBars      =   2  'Vertical
       TabIndex        =   3
-      Top             =   5940
+      Top             =   6480
+      Width           =   6735
+   End
+   Begin VB.Label lblContadorTimeout 
+      Alignment       =   2  'Center
+      Caption         =   "Tempo restante: 03:00"
+      BeginProperty Font 
+         Name            =   "MS Sans Serif"
+         Size            =   8.25
+         Charset         =   0
+         Weight          =   700
+         Underline       =   0   'False
+         Italic          =   0   'False
+         Strikethrough   =   0   'False
+      EndProperty
+      ForeColor       =   &H00000080&
+      Height          =   255
+      Left            =   360
+      TabIndex        =   10
+      Top             =   4440
       Width           =   6735
    End
    Begin VB.Label lblSplitDetalhamento 
       Alignment       =   2  'Center
       BackColor       =   &H00E0FFFF&
       BorderStyle     =   1  'Fixed Single
-      Caption         =   "Previsão Split Payment: Bruto R$ 0,00 | CBS/IBS retido: R$ 0,00 | Líquido Caixa: R$ 0,00"
+      Caption         =   "Previsão Split Payment: Bruto R$ 0,00 | CBS/IBS: R$ 0,00 | Líquido Caixa: R$ 0,00"
       BeginProperty Font 
          Name            =   "MS Sans Serif"
          Size            =   8.25
@@ -61,10 +88,10 @@ Begin VB.Form frmPixSupermercado
          Strikethrough   =   0   'False
       EndProperty
       ForeColor       =   &H00800000&
-      Height          =   495
+      Height          =   435
       Left            =   360
       TabIndex        =   8
-      Top             =   5160
+      Top             =   5700
       Width           =   6735
    End
    Begin VB.PictureBox picQrCode 
@@ -79,11 +106,11 @@ Begin VB.Form frmPixSupermercado
       Width           =   2775
    End
    Begin VB.Label lblInstrucaoCopiaCola 
-      Caption         =   "Código Pix Copia e Cola (para conferência ou pagamento alternativo):"
+      Caption         =   "Código Pix Copia e Cola:"
       Height          =   255
       Left            =   360
       TabIndex        =   7
-      Top             =   5700
+      Top             =   6240
       Width           =   5500
    End
    Begin VB.Label lblStatus 
@@ -99,10 +126,10 @@ Begin VB.Form frmPixSupermercado
          Strikethrough   =   0   'False
       EndProperty
       ForeColor       =   &H00C00000&
-      Height          =   375
+      Height          =   550
       Left            =   240
       TabIndex        =   6
-      Top             =   4680
+      Top             =   4800
       Width           =   6975
    End
    Begin VB.Label lblTituloValor 
@@ -147,6 +174,9 @@ Private mValorVenda As Double
 Private mPagoComSucesso As Boolean
 Private mEndToEndId As String
 Private mJsonRetorno As String
+
+' Timeout do PDV (3 minutos = 180 segundos)
+Private mSegundosRestantes As Integer
 
 ' Valores de Conciliação Financeira (Split Payment)
 Private mValorBruto As Double
@@ -197,10 +227,12 @@ Public Sub IniciarCobranca(ByVal vValor As Double, ByVal sDescricao As String)
     mPagoComSucesso = False
     mEndToEndId = ""
     mValorBruto = vValor
+    mSegundosRestantes = 180 ' 3 minutos limite de espera do caixa
     
     lblTituloValor.Caption = "TOTAL A PAGAR: R$ " & FormatNumber(mValorVenda, 2)
     lblStatus.Caption = "Conectando ao banco e gerando QR Code Pix..."
     lblStatus.ForeColor = &HC00000
+    AtualizarLabelTimeout
     
     On Error Resume Next
     Set mBridge = CreateObject("BridgeRTC.BridgeRTCService")
@@ -217,21 +249,20 @@ Public Sub IniciarCobranca(ByVal vValor As Double, ByVal sDescricao As String)
     mTxId = "PDV" & Format(Now, "yyyymmddhhnnss") & "001"
     
     Dim respJson As String
-    respJson = mBridge.CriarCobrancaPix(mTxId, mValorVenda, 3600, sDescricao)
+    respJson = mBridge.CriarCobrancaPix(mTxId, mValorVenda, 180, sDescricao)
     mJsonRetorno = respJson
     
     If InStr(respJson, """STATUS"":""OK""") > 0 Then
         txtPixCopiaECola.Text = ExtrairValorJson(respJson, "pixCopiaECola")
         DesenharVisualQrCode
         
-        ' Exibe estimativa de segregação na tela
         Dim prevTrib As Double, prevLiq As Double
         prevTrib = Val(ExtrairValorJson(respJson, "previsaoTributosRetidos"))
         prevLiq = Val(ExtrairValorJson(respJson, "previsaoLiquidoConta"))
         
         lblSplitDetalhamento.Caption = "Split Payment: Venda R$ " & FormatNumber(mValorVenda, 2) & _
             " | Impostos Retidos: R$ " & FormatNumber(prevTrib, 2) & _
-            " | Líquido Conta: R$ " & FormatNumber(prevLiq, 2)
+            " | Líquido Caixa: R$ " & FormatNumber(prevLiq, 2)
         
         lblStatus.Caption = "Aguardando leitura do QR Code pelo cliente no app do banco..."
         lblStatus.ForeColor = &H8000&
@@ -246,6 +277,22 @@ Public Sub IniciarCobranca(ByVal vValor As Double, ByVal sDescricao As String)
 End Sub
 
 Private Sub tmrPolling_Timer()
+    ' Decrementa tempo restante (cada tick ~ 2.5s)
+    mSegundosRestantes = mSegundosRestantes - 2
+    AtualizarLabelTimeout
+    
+    If mSegundosRestantes <= 0 Then
+        tmrPolling.Enabled = False
+        lblStatus.Caption = "TEMPO ESGOTADO. Se o cliente já pagou, clique em 'Reconsultar Banco'."
+        lblStatus.ForeColor = vbRed
+        Beep
+        Exit Sub
+    End If
+    
+    ChecarPagamentoComBanco
+End Sub
+
+Private Sub ChecarPagamentoComBanco()
     If mBridge Is Nothing Or mTxId = "" Then Exit Sub
     
     Dim respConsulta As String
@@ -284,15 +331,35 @@ Private Sub tmrPolling_Timer()
     End If
 End Sub
 
+Private Sub cmdReconsultarBanco_Click()
+    ' Reconsulta forçada pelo operador quando a internet oscilou
+    lblStatus.Caption = "Reconsultando status do Pix junto ao banco..."
+    lblStatus.ForeColor = &HC00000
+    ChecarPagamentoComBanco
+    If Not mPagoComSucesso Then
+        lblStatus.Caption = "Banco informa: Pagamento ainda pendente de confirmação."
+        lblStatus.ForeColor = &H80&
+    End If
+End Sub
+
 Private Sub cmdSimularConfirmacao_Click()
     If mBridge Is Nothing Or mTxId = "" Then Exit Sub
     mBridge.SimularPagamentoPix mTxId
+    ChecarPagamentoComBanco
 End Sub
 
 Private Sub cmdCancelar_Click()
     tmrPolling.Enabled = False
     mPagoComSucesso = False
     Unload Me
+End Sub
+
+Private Sub AtualizarLabelTimeout()
+    Dim min As Integer, seg As Integer
+    If mSegundosRestantes < 0 Then mSegundosRestantes = 0
+    min = mSegundosRestantes \ 60
+    seg = mSegundosRestantes Mod 60
+    lblContadorTimeout.Caption = "Tempo de espera no caixa: " & Format(min, "00") & ":" & Format(seg, "00")
 End Sub
 
 Private Sub Form_Unload(Cancel As Integer)
@@ -314,8 +381,10 @@ Private Function ExtrairValorJson(ByVal json As String, ByVal chave As String) A
     Loop
     
     posFim = InStr(posInicio, json, """")
-    If posFim = 0 Then posFim = InStr(posInicio, json, ",")
-    If posFim = 0 Then posFim = InStr(posInicio, json, "}")
+    If posFim = 0 Then
+        posFim = InStr(posInicio, json, ",")
+        If posFim = 0 Then posFim = InStr(posInicio, json, "}")
+    End If
     
     If posFim > posInicio Then
         ExtrairValorJson = Mid$(json, posInicio, posFim - posInicio)
