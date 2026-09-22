@@ -1,20 +1,28 @@
 VERSION 5.00
 Begin VB.Form Form1 
    Caption         =   "Teste BridgeRTC - Split Payment e Pix Bacen"
-   ClientHeight    =   7800
+   ClientHeight    =   8200
    ClientLeft      =   60
    ClientTop       =   450
    ClientWidth     =   7800
    LinkTopic       =   "Form1"
-   ScaleHeight     =   7800
+   ScaleHeight     =   8200
    ScaleWidth      =   7800
    StartUpPosition =   2  'CenterScreen
+   Begin VB.CommandButton cmdEstornoPix 
+      Caption         =   "5. Testar Devolucao / Estorno de Pix no Caixa"
+      Height          =   450
+      Left            =   360
+      TabIndex        =   7
+      Top             =   1920
+      Width           =   7095
+   End
    Begin VB.CommandButton cmdConciliacao 
       Caption         =   "4. Conciliacao Financeira Split Payment"
-      Height          =   495
+      Height          =   450
       Left            =   360
       TabIndex        =   6
-      Top             =   1440
+      Top             =   1380
       Width           =   7095
    End
    Begin VB.CommandButton cmdAbrirPixSupermercado 
@@ -28,23 +36,23 @@ Begin VB.Form Form1
          Italic          =   0   'False
          Strikethrough   =   0   'False
       EndProperty
-      Height          =   550
+      Height          =   500
       Left            =   360
       TabIndex        =   5
-      Top             =   2040
+      Top             =   2460
       Width           =   7095
    End
    Begin VB.CommandButton cmdStatus 
       Caption         =   "1. Consultar Status Servico"
-      Height          =   495
+      Height          =   450
       Left            =   360
       TabIndex        =   0
       Top             =   240
       Width           =   3400
    End
    Begin VB.CommandButton cmdGerarXml 
-      Caption         =   "2. Gerar Grupo Pagamento XML"
-      Height          =   495
+      Caption         =   "2. Gerar Grupo Pagto XML (tpIntegra=1)"
+      Height          =   450
       Left            =   3960
       TabIndex        =   1
       Top             =   240
@@ -52,19 +60,19 @@ Begin VB.Form Form1
    End
    Begin VB.CommandButton cmdVincular 
       Caption         =   "3. Testar Vinculacao SEFAZ (Evento 110300)"
-      Height          =   495
+      Height          =   450
       Left            =   360
       TabIndex        =   2
-      Top             =   840
+      Top             =   810
       Width           =   7095
    End
    Begin VB.TextBox txtResultado 
-      Height          =   4900
+      Height          =   4800
       Left            =   360
       MultiLine       =   -1  'True
       ScrollBars      =   3  'Both
       TabIndex        =   3
-      Top             =   2760
+      Top             =   3240
       Width           =   7095
    End
    Begin VB.Label lblStatus 
@@ -72,7 +80,7 @@ Begin VB.Form Form1
       Height          =   255
       Left            =   360
       TabIndex        =   4
-      Top             =   2520
+      Top             =   3000
       Width           =   2000
    End
 End
@@ -99,7 +107,7 @@ Private Sub cmdAbrirPixSupermercado_Click()
                "(-) Total Impostos Retidos......: R$ " & FormatNumber(frmPixSupermercado.ValorTributosRetidos, 2) & vbCrLf & _
                "(-) Tarifa Transacional PSP.....: R$ " & FormatNumber(frmPixSupermercado.ValorTarifa, 2) & vbCrLf & _
                "(=) LIQUIDO A ENTRAR NO CAIXA...: R$ " & FormatNumber(frmPixSupermercado.ValorLiquido, 2) & vbCrLf & vbCrLf & _
-               "Emitindo NFC-e com meio de pagamento 17 (Pix) e idTransacao..." & vbCrLf & vbCrLf & _
+               "Emitindo NFC-e com tpIntegra=1 e tPag=17 (Pix)..." & vbCrLf & vbCrLf & _
                "Retorno completo JSON da DLL:" & vbCrLf & _
                frmPixSupermercado.JsonUltimoRetorno
         txtResultado.Text = sLog
@@ -109,6 +117,25 @@ Private Sub cmdAbrirPixSupermercado_Click()
     End If
     
     Unload frmPixSupermercado
+End Sub
+
+Private Sub cmdEstornoPix_Click()
+    On Error GoTo TrataErro
+    Dim bridge As Object
+    Set bridge = CreateObject("BridgeRTC.BridgeRTCService")
+    bridge.ConfigurarAmbiente 2, "SP"
+    bridge.ConfigurarPix "SIMULADOR", "", "", "", "", ""
+    
+    ' Simula o estorno de um Pix efetuado (ex: desistência ou erro de impressão)
+    Dim e2eId As String, idDev As String
+    e2eId = "E1234567820260922120000000001"
+    idDev = "DEV" & Format(Now, "yyyymmddhhnnss")
+    
+    txtResultado.Text = bridge.DevolverPix(e2eId, idDev, 100#, "Cancelamento de compra pelo cliente no PDV")
+    Set bridge = Nothing
+    Exit Sub
+TrataErro:
+    txtResultado.Text = "Erro: " & Err.Description
 End Sub
 
 Private Sub cmdConciliacao_Click()
