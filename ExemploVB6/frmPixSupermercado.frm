@@ -243,8 +243,20 @@ Public Sub IniciarCobranca(ByVal vValor As Double, ByVal sDescricao As String)
     End If
     On Error GoTo 0
     
+    ' =========================================================================
+    ' SELECAO DO AMBIENTE (Simulador, Homologacao ou Producao):
+    ' =========================================================================
+    ' Opcao 1 (Padrao): MODO SIMULADOR
     mBridge.ConfigurarAmbiente 2, "SP"
     mBridge.ConfigurarPix "SIMULADOR", "", "", "suporte@meuerp.com.br", "", ""
+    
+    ' Opcao 2: MODO HOMOLOGACAO (Descomente para testar contra sandbox do banco)
+    ' mBridge.ConfigurarAmbiente 2, "SP"
+    ' mBridge.ConfigurarPix "ITAU", "CLIENT_ID_HM", "CLIENT_SECRET_HM", "chave_hm@loja.com", "C:\Cert\cert_hm.pfx", "senha123"
+    
+    ' Opcao 3: MODO PRODUCAO (Descomente em ambiente real de vendas)
+    ' mBridge.ConfigurarAmbiente 1, "SP"
+    ' mBridge.ConfigurarPix "ITAU", "CLIENT_ID_PROD", "CLIENT_SECRET_PROD", "chave_real@loja.com", "C:\Cert\cert_prod.pfx", "senha123" ""
     
     mTxId = "PDV" & Format(Now, "yyyymmddhhnnss") & "001"
     
