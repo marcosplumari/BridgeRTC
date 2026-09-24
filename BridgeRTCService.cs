@@ -53,6 +53,15 @@ namespace BridgeRTC
 
         [DispId(13)]
         string ConfigurarPixCustomizado(string urlBase, string urlOAuth, string clientId, string clientSecret, string chavePix, string caminhoCertificadoPfx, string senhaCertificado);
+
+        [DispId(14)]
+        string CriarBoletoHibridoPix(string nossoNumeroOuTxId, double valorOriginal, string dataVencimentoIso, int diasValidadeAposVencimento, double valorAbatimentoDesconto, string dataLimiteDescontoIso, double percentualMulta, double percentualJurosMensal, string cpfCnpjDevedor, string nomeDevedor, string solicitacaoPagador);
+
+        [DispId(15)]
+        string ConsultarBoletoPix(string nossoNumeroOuTxId);
+
+        [DispId(16)]
+        string SimularPagamentoBoletoPix(string nossoNumeroOuTxId, string dataPagamentoIsoSimulada);
     }
 
     [Guid("B2C3D4E5-F6A7-4B6C-9D8E-0F1A2B3C4D5E")]
@@ -79,6 +88,29 @@ namespace BridgeRTC
 
         private static readonly Dictionary<string, PixSimuladoData> _cobrancasSimuladas = new Dictionary<string, PixSimuladoData>();
         private static readonly Dictionary<string, DevolucaoSimuladaData> _devolucoesSimuladas = new Dictionary<string, DevolucaoSimuladaData>();
+        private static readonly Dictionary<string, BoletoPixSimuladoData> _boletosSimulados = new Dictionary<string, BoletoPixSimuladoData>();
+
+        private class BoletoPixSimuladoData
+        {
+            public string NossoNumero { get; set; }
+            public double ValorOriginal { get; set; }
+            public DateTime DataVencimento { get; set; }
+            public int DiasValidadeAposVencimento { get; set; }
+            public double ValorDesconto { get; set; }
+            public DateTime? DataLimiteDesconto { get; set; }
+            public double PercMulta { get; set; }
+            public double PercJurosMensal { get; set; }
+            public string CpfCnpjDevedor { get; set; }
+            public string NomeDevedor { get; set; }
+            public string Status { get; set; }
+            public string PixCopiaECola { get; set; }
+            public double ValorPagoFinal { get; set; }
+            public double ValorDescontoAplicado { get; set; }
+            public double ValorMultaAplicada { get; set; }
+            public double ValorJurosAplicados { get; set; }
+            public DateTime? DataPagamento { get; set; }
+            public string EndToEndId { get; set; }
+        }
 
         private class PixSimuladoData
         {
@@ -897,5 +929,319 @@ namespace BridgeRTC
 
             return _jsonSerializer.Serialize(pacoteRetorno);
         }
+    
+        public string CriarBoletoHibridoPix(string nossoNumeroOuTxId, double valorOriginal, string dataVencimentoIso, int diasValidadeAposVencimento, double valorAbatimentoDesconto, string dataLimiteDescontoIso, double percentualMulta, double percentualJurosMensal, string cpfCnpjDevedor, string nomeDevedor, string solicitacaoPagador)
+        {
+            try
+            {
+                if (string.IsNullOrWhiteSpace(nossoNumeroOuTxId))
+                {
+                    nossoNumeroOuTxId = "BOL" + DateTime.Now.ToString("yyyyMMddHHmmss") + "001";
+                }
+
+                if (valorOriginal <= 0)
+                {
+                    return FormatarRetorno("ERRO", "O valor original do boleto deve ser maior que zero.", null);
+                }
+
+                DateTime vencimento;
+                if (!DateTime.TryParse(dataVencimentoIso, CultureInfo.InvariantCulture, DateTimeStyles.None, out vencimento) &&
+                    !DateTime.TryParseExact(dataVencimentoIso, new string[] { "yyyy-MM-dd", "dd/MM/yyyy" }, CultureInfo.InvariantCulture, DateTimeStyles.None, out vencimento))
+                {
+                    return FormatarRetorno("ERRO", "Data de vencimento invalida. Utilize o formato YYYY-MM-DD ou DD/MM/YYYY.", null);
+                }
+
+                DateTime? limiteDesconto = null;
+                if (!string.IsNullOrWhiteSpace(dataLimiteDescontoIso))
+                {
+                    DateTime parsedDesc;
+                    if (DateTime.TryParse(dataLimiteDescontoIso, CultureInfo.InvariantCulture, DateTimeStyles.None, out parsedDesc) ||
+                        DateTime.TryParseExact(dataLimiteDescontoIso, new string[] { "yyyy-MM-dd", "dd/MM/yyyy" }, CultureInfo.InvariantCulture, DateTimeStyles.None, out parsedDesc))
+                    {
+                        limiteDesconto = parsedDesc;
+                    }
+                }
+
+                if (diasValidadeAposVencimento <= 0) diasValidadeAposVencimento = 30;
+
+                // Modo Real (Banco com API Pix CobV)
+                if (_pixInstituicao != "SIMULADOR" && !string.IsNullOrEmpty(_pixClientId))
+                {
+                    string token = ObterTokenOAuthPix();
+                    string urlCobV = ObterUrlBasePix() + "/v2/cobv/" + nossoNumeroOuTxId;
+
+                    HttpWebRequest request = (HttpWebRequest)WebRequest.Create(urlCobV);
+                    request.Method = "PUT";
+                    request.ContentType = "application/json";
+                    request.Headers["Authorization"] = "Bearer " + token;
+
+                    if (_pixCertificado != null)
+                    {
+                        request.ClientCertificates.Add(_pixCertificado);
+                    }
+
+                    var payloadDict = new Dictionary<string, object>
+                    {
+                        { "calendario", new Dictionary<string, object> {
+                            { "dataDeVencimento", vencimento.ToString("yyyy-MM-dd") },
+                            { "validadeAposVencimento", diasValidadeAposVencimento }
+                        }},
+                        { "devedor", new Dictionary<string, object> {
+                            { (cpfCnpjDevedor != null && cpfCnpjDevedor.Length > 11 ? "cnpj" : "cpf"), (cpfCnpjDevedor ?? "").Replace(".", "").Replace("-", "").Replace("/", "") },
+                            { "nome", nomeDevedor ?? "CLIENTE" }
+                        }},
+                        { "valor", new Dictionary<string, object> {
+                            { "original", valorOriginal.ToString("F2", CultureInfo.InvariantCulture) },
+                            { "multa", new Dictionary<string, object> { { "modalidade", 2 }, { "valorPerc", percentualMulta.ToString("F2", CultureInfo.InvariantCulture) } } },
+                            { "juros", new Dictionary<string, object> { { "modalidade", 2 }, { "valorPerc", percentualJurosMensal.ToString("F2", CultureInfo.InvariantCulture) } } }
+                        }},
+                        { "chave", _pixChave },
+                        { "solicitacaoPagador", string.IsNullOrEmpty(solicitacaoPagador) ? ("Boleto NossoNumero " + nossoNumeroOuTxId) : solicitacaoPagador }
+                    };
+
+                    if (valorAbatimentoDesconto > 0 && limiteDesconto.HasValue)
+                    {
+                        var valorSub = (Dictionary<string, object>)payloadDict["valor"];
+                        valorSub.Add("desconto", new Dictionary<string, object> {
+                            { "modalidade", 1 },
+                            { "descontoDataFixa", new List<object> {
+                                new Dictionary<string, object> {
+                                    { "data", limiteDesconto.Value.ToString("yyyy-MM-dd") },
+                                    { "valorPerc", (Math.Round((valorAbatimentoDesconto / valorOriginal) * 100.0, 2)).ToString("F2", CultureInfo.InvariantCulture) }
+                                }
+                            }}
+                        });
+                    }
+
+                    byte[] postBytes = Encoding.UTF8.GetBytes(_jsonSerializer.Serialize(payloadDict));
+                    request.ContentLength = postBytes.Length;
+
+                    using (Stream reqStream = request.GetRequestStream())
+                    {
+                        reqStream.Write(postBytes, 0, postBytes.Length);
+                    }
+
+                    using (HttpWebResponse response = (HttpWebResponse)request.GetResponse())
+                    using (StreamReader reader = new StreamReader(response.GetResponseStream(), Encoding.UTF8))
+                    {
+                        string jsonResp = reader.ReadToEnd();
+                        var respDict = _jsonSerializer.Deserialize<Dictionary<string, object>>(jsonResp);
+                        string pixCopiaECola = respDict.ContainsKey("pixCopiaECola") ? respDict["pixCopiaECola"].ToString() : "";
+
+                        var retObj = new Dictionary<string, object>
+                        {
+                            { "nossoNumero", nossoNumeroOuTxId },
+                            { "pixCopiaECola", pixCopiaECola },
+                            { "status", "ATIVA" },
+                            { "valorOriginal", valorOriginal },
+                            { "vencimento", vencimento.ToString("yyyy-MM-dd") },
+                            { "diasValidadeAposVencimento", diasValidadeAposVencimento },
+                            { "bancoIntegrado", true }
+                        };
+
+                        return FormatarRetorno("OK", "Boleto Hibrido com Pix gerado com sucesso na instituicao bancaria.", retObj);
+                    }
+                }
+
+                // Modo Simulador
+                string locationMock = "pix.bancoexemplo.com.br/cobv/" + nossoNumeroOuTxId;
+                string copiaEColaMock = "00020126580014br.gov.bcb.pix2536" + locationMock + "520400005303986540" + valorOriginal.ToString("F2", CultureInfo.InvariantCulture) + "5802BR5915EMPRESA LOJA SA6009SAO PAULO62070503***6304ABCD";
+
+                var boletoData = new BoletoPixSimuladoData
+                {
+                    NossoNumero = nossoNumeroOuTxId,
+                    ValorOriginal = valorOriginal,
+                    DataVencimento = vencimento,
+                    DiasValidadeAposVencimento = diasValidadeAposVencimento,
+                    ValorDesconto = valorAbatimentoDesconto,
+                    DataLimiteDesconto = limiteDesconto,
+                    PercMulta = percentualMulta,
+                    PercJurosMensal = percentualJurosMensal,
+                    CpfCnpjDevedor = cpfCnpjDevedor,
+                    NomeDevedor = nomeDevedor,
+                    Status = "ATIVA",
+                    PixCopiaECola = copiaEColaMock,
+                    ValorPagoFinal = 0,
+                    ValorDescontoAplicado = 0,
+                    ValorMultaAplicada = 0,
+                    ValorJurosAplicados = 0,
+                    DataPagamento = null,
+                    EndToEndId = ""
+                };
+
+                _boletosSimulados[nossoNumeroOuTxId] = boletoData;
+
+                var retSimulado = new Dictionary<string, object>
+                {
+                    { "nossoNumero", nossoNumeroOuTxId },
+                    { "pixCopiaECola", copiaEColaMock },
+                    { "status", "ATIVA" },
+                    { "valorOriginal", valorOriginal },
+                    { "vencimento", vencimento.ToString("yyyy-MM-dd") },
+                    { "descontoDisponivel", valorAbatimentoDesconto },
+                    { "limiteDesconto", limiteDesconto.HasValue ? limiteDesconto.Value.ToString("yyyy-MM-dd") : "" },
+                    { "percentualMulta", percentualMulta },
+                    { "percentualJurosMensal", percentualJurosMensal },
+                    { "instrucaoImpressao", "Pague com Pix escaneando o QR Code ao lado. Descontos e acrescimos sao calculados automaticamente pelo seu banco." }
+                };
+
+                return FormatarRetorno("OK", "Boleto Hibrido Pix (CobV) criado com sucesso (Modo Simulador).", retSimulado);
+            }
+            catch (Exception ex)
+            {
+                return FormatarRetorno("ERRO", "Falha ao gerar Boleto Hibrido com Pix: " + ex.Message, null);
+            }
+        }
+
+        public string ConsultarBoletoPix(string nossoNumeroOuTxId)
+        {
+            try
+            {
+                if (string.IsNullOrWhiteSpace(nossoNumeroOuTxId))
+                {
+                    return FormatarRetorno("ERRO", "Nosso Numero / TxId e obrigatorio.", null);
+                }
+
+                if (_pixInstituicao != "SIMULADOR" && !string.IsNullOrEmpty(_pixClientId))
+                {
+                    string token = ObterTokenOAuthPix();
+                    string urlCobV = ObterUrlBasePix() + "/v2/cobv/" + nossoNumeroOuTxId;
+
+                    HttpWebRequest request = (HttpWebRequest)WebRequest.Create(urlCobV);
+                    request.Method = "GET";
+                    request.Headers["Authorization"] = "Bearer " + token;
+
+                    if (_pixCertificado != null)
+                    {
+                        request.ClientCertificates.Add(_pixCertificado);
+                    }
+
+                    using (HttpWebResponse response = (HttpWebResponse)request.GetResponse())
+                    using (StreamReader reader = new StreamReader(response.GetResponseStream(), Encoding.UTF8))
+                    {
+                        string jsonResp = reader.ReadToEnd();
+                        var respDict = _jsonSerializer.Deserialize<Dictionary<string, object>>(jsonResp);
+                        return FormatarRetorno("OK", "Consulta de Boleto Pix realizada com sucesso.", respDict);
+                    }
+                }
+
+                if (_boletosSimulados.ContainsKey(nossoNumeroOuTxId))
+                {
+                    var bol = _boletosSimulados[nossoNumeroOuTxId];
+                    var dados = new Dictionary<string, object>
+                    {
+                        { "nossoNumero", bol.NossoNumero },
+                        { "status", bol.Status },
+                        { "valorOriginal", bol.ValorOriginal },
+                        { "vencimento", bol.DataVencimento.ToString("yyyy-MM-dd") },
+                        { "valorPagoFinal", bol.ValorPagoFinal },
+                        { "valorDescontoAplicado", bol.ValorDescontoAplicado },
+                        { "valorMultaAplicada", bol.ValorMultaAplicada },
+                        { "valorJurosAplicados", bol.ValorJurosAplicados },
+                        { "dataPagamento", bol.DataPagamento.HasValue ? bol.DataPagamento.Value.ToString("yyyy-MM-dd HH:mm:ss") : null },
+                        { "endToEndId", bol.EndToEndId },
+                        { "pixCopiaECola", bol.PixCopiaECola }
+                    };
+
+                    return FormatarRetorno("OK", "Boleto Pix consultado no simulador.", dados);
+                }
+
+                return FormatarRetorno("ERRO", "Boleto Pix nao encontrado no simulador com o Nosso Numero informado.", null);
+            }
+            catch (Exception ex)
+            {
+                return FormatarRetorno("ERRO", "Erro ao consultar Boleto Pix: " + ex.Message, null);
+            }
+        }
+
+        public string SimularPagamentoBoletoPix(string nossoNumeroOuTxId, string dataPagamentoIsoSimulada)
+        {
+            try
+            {
+                if (!_boletosSimulados.ContainsKey(nossoNumeroOuTxId))
+                {
+                    return FormatarRetorno("ERRO", "Boleto com Nosso Numero " + nossoNumeroOuTxId + " nao foi encontrado.", null);
+                }
+
+                var bol = _boletosSimulados[nossoNumeroOuTxId];
+
+                DateTime dtPagamento = DateTime.Now;
+                if (!string.IsNullOrWhiteSpace(dataPagamentoIsoSimulada))
+                {
+                    DateTime parsed;
+                    if (DateTime.TryParse(dataPagamentoIsoSimulada, CultureInfo.InvariantCulture, DateTimeStyles.None, out parsed) ||
+                        DateTime.TryParseExact(dataPagamentoIsoSimulada, new string[] { "yyyy-MM-dd", "dd/MM/yyyy" }, CultureInfo.InvariantCulture, DateTimeStyles.None, out parsed))
+                    {
+                        dtPagamento = parsed;
+                    }
+                }
+
+                double valorFinal = bol.ValorOriginal;
+                double descontoAplicado = 0;
+                double multaAplicada = 0;
+                double jurosAplicados = 0;
+
+                // Cenário 1: Pagamento antecipado com desconto
+                if (bol.ValorDesconto > 0 && bol.DataLimiteDesconto.HasValue && dtPagamento.Date <= bol.DataLimiteDesconto.Value.Date)
+                {
+                    descontoAplicado = bol.ValorDesconto;
+                    valorFinal = Math.Round(bol.ValorOriginal - descontoAplicado, 2);
+                }
+                // Cenário 2: Pagamento em atraso (após o vencimento)
+                else if (dtPagamento.Date > bol.DataVencimento.Date)
+                {
+                    int diasAtraso = (int)(dtPagamento.Date - bol.DataVencimento.Date).TotalDays;
+
+                    // Multa percentual fixa sobre o original
+                    if (bol.PercMulta > 0)
+                    {
+                        multaAplicada = Math.Round(bol.ValorOriginal * (bol.PercMulta / 100.0), 2);
+                    }
+
+                    // Juros pró-rata dia com base no percentual mensal
+                    if (bol.PercJurosMensal > 0)
+                    {
+                        double jurosDia = (bol.PercJurosMensal / 30.0) / 100.0;
+                        jurosAplicados = Math.Round(bol.ValorOriginal * jurosDia * diasAtraso, 2);
+                    }
+
+                    valorFinal = Math.Round(bol.ValorOriginal + multaAplicada + jurosAplicados, 2);
+                }
+
+                bol.Status = "CONCLUIDA";
+                bol.ValorPagoFinal = valorFinal;
+                bol.ValorDescontoAplicado = descontoAplicado;
+                bol.ValorMultaAplicada = multaAplicada;
+                bol.ValorJurosAplicados = jurosAplicados;
+                bol.DataPagamento = dtPagamento;
+                bol.EndToEndId = "E" + DateTime.Now.ToString("yyyyMMddHHmmss") + "BOL" + (new Random().Next(1000, 9999));
+
+                var res = new Dictionary<string, object>
+                {
+                    { "nossoNumero", bol.NossoNumero },
+                    { "status", "CONCLUIDA" },
+                    { "valorOriginal", bol.ValorOriginal },
+                    { "dataPagamento", dtPagamento.ToString("yyyy-MM-dd") },
+                    { "descontoAplicado", descontoAplicado },
+                    { "multaAplicada", multaAplicada },
+                    { "jurosAplicados", jurosAplicados },
+                    { "valorPagoFinal", valorFinal },
+                    { "endToEndId", bol.EndToEndId },
+                    { "liquidacaoInstantanea", true },
+                    { "conciliacaoCnab", new Dictionary<string, object> {
+                        { "ocorrencia", "06-LIQUIDACAO_PIX" },
+                        { "valorTarifaEstimada", 0.99 },
+                        { "valorLiquidoCreditado", Math.Round(valorFinal - 0.99, 2) }
+                    }}
+                };
+
+                return FormatarRetorno("OK", "Pagamento de Boleto Hibrido via Pix confirmado com sucesso.", res);
+            }
+            catch (Exception ex)
+            {
+                return FormatarRetorno("ERRO", "Falha ao simular liquidacao de boleto: " + ex.Message, null);
+            }
+        }
+
     }
 }
