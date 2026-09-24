@@ -1,12 +1,12 @@
 VERSION 5.00
 Begin VB.Form Form1 
    Caption         =   "Teste BridgeRTC - Split Payment e Pix Bacen"
-   ClientHeight    =   8600
+   ClientHeight    =   9200
    ClientLeft      =   60
    ClientTop       =   450
    ClientWidth     =   7800
    LinkTopic       =   "Form1"
-   ScaleHeight     =   8600
+   ScaleHeight     =   9200
    ScaleWidth      =   7800
    StartUpPosition =   2  'CenterScreen
    Begin VB.CommandButton cmdStatus 
@@ -57,6 +57,14 @@ Begin VB.Form Form1
       Top             =   2400
       Width           =   7095
    End
+   Begin VB.CommandButton cmdAbrirBoletoPix 
+      Caption         =   "7. Testar Boleto Hibrido com Pix (ActiveReports / CobV)"
+      Height          =   450
+      Left            =   360
+      TabIndex        =   6
+      Top             =   2940
+      Width           =   7095
+   End
    Begin VB.CommandButton cmdAbrirPixSupermercado 
       Caption         =   "Abrir Tela PIX Supermercado (Modal / Auto Fechamento)"
       BeginProperty Font 
@@ -71,7 +79,7 @@ Begin VB.Form Form1
       Height          =   500
       Left            =   360
       TabIndex        =   6
-      Top             =   2940
+      Top             =   3480
       Width           =   7095
    End
    Begin VB.Label lblStatus 
@@ -79,7 +87,7 @@ Begin VB.Form Form1
       Height          =   255
       Left            =   360
       TabIndex        =   7
-      Top             =   3560
+      Top             =   4100
       Width           =   2000
    End
    Begin VB.TextBox txtResultado 
@@ -88,7 +96,7 @@ Begin VB.Form Form1
       MultiLine       =   -1  'True
       ScrollBars      =   3  'Both
       TabIndex        =   8
-      Top             =   3840
+      Top             =   4380
       Width           =   7095
    End
 End
@@ -240,4 +248,10 @@ Private Sub cmdVincular_Click()
     Exit Sub
 TrataErro:
     txtResultado.Text = "Erro: " & Err.Description
+End Sub
+
+Private Sub cmdAbrirBoletoPix_Click()
+    Load frmBoletoPix
+    frmBoletoPix.Show vbModal
+    Unload frmBoletoPix
 End Sub
