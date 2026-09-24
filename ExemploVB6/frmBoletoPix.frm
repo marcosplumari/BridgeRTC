@@ -220,8 +220,26 @@ Private mUltimoCopiaECola As String
 Private Sub Form_Load()
     On Error Resume Next
     Set mBridge = CreateObject("BridgeRTC.BridgeRTCService")
+
+    ' =========================================================================
+    ' SELECAO DO AMBIENTE DE TRABALHO (Escolha UMA das 3 opcoes abaixo):
+    ' =========================================================================
+
+    ' --- OPCAO 1: MODO SIMULADOR (Para desenvolvimento interno sem comunicacao bancaria) ---
     mBridge.ConfigurarAmbiente 2, "SP"
     mBridge.ConfigurarPix "SIMULADOR", "", "", "", "", ""
+
+    ' --- OPCAO 2: MODO HOMOLOGACAO / SANDBOX (Testes reais contra a API de testes do Banco) ---
+    ' Descomente as linhas abaixo e comente a OPCAO 1 quando for homologar:
+    ' mBridge.ConfigurarAmbiente 2, "SP"  ' 2 = Homologacao
+    ' mBridge.ConfigurarPix "ITAU", "SEU_CLIENT_ID_HM", "SEU_CLIENT_SECRET_HM", "sua_chave_pix_hm", "C:\Certificados\empresa_hm.pfx", "SenhaCertificado123"
+    ' OU para banco customizado:
+    ' mBridge.ConfigurarPixCustomizado "https://api-sandbox.banco.com.br/pix/v2", "https://oauth-sandbox.banco.com.br/token", "SEU_CLIENT_ID", "SEU_SECRET", "chave_pix", "C:\Cert\cert.pfx", "senha"
+
+    ' --- OPCAO 3: MODO PRODUCAO (Boletos e Pix reais valendo dinheiro) ---
+    ' Descomente apenas quando a aplicacao no banco for aprovada e estiver no ar:
+    ' mBridge.ConfigurarAmbiente 1, "SP"  ' 1 = Producao
+    ' mBridge.ConfigurarPix "ITAU", "CLIENT_ID_PRODUCAO", "CLIENT_SECRET_PRODUCAO", "sua_chave_pix_real", "C:\Certificados\empresa_prod.pfx", "SenhaCertificado123"
 End Sub
 
 Private Sub Form_Unload(Cancel As Integer)
